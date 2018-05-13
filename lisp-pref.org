@@ -1,0 +1,187 @@
+* Design requirements
+
+The goal of this system is to provide a uniform mechanism to access
+and edit configuration options.
+
+The following requirements must be fulfilled:
+
+** Ability to replace the storage engine
+
+In most cases, configuration data would be stored in files in the
+user's home directory. However, there are cases where one might want
+to store configuration in a central location.
+
+** Must not require Lisp code to be loaded when the configuration system is not being used
+
+What this means is that the necessary configuration to make the system
+work (for example, the storage engine configuration) must not itself
+require the configuration system to be available.
+
+The reason for this is that one wants to be able to configure the
+system once, and users are unlikely to want to load a bunch of Lisp
+code from their =$HOME/.sbclrc=.
+
+** It should be possible to read configuration data belonging to a system which is not loaded
+
+A consequence of this is that whatever mechanism is used to read a
+configuration value, it should not require the caller to pass in a
+symbol from the (possible unavailable) system. It also means that
+configuration values cannot be instances of classes that are part of
+said system.
+
+This means that configuration data must be limited to standard Lisp
+types.
+
+** Configuration entries needs to be categorised by arbitrary topics
+
+Some configuration options are global for multiple applications. We
+also want to be able to arrange the values in a tree structure so that
+they can be displayed in a configuration user interface.
+
+* Bootstrapping
+
+Bootstrapping the system is particularly difficult. Because of the
+requirement that the initial configuration must be independent of
+any code, we are limited to small number of mechanisms:
+
+  - Store bootstrapping configuration in variables in the package
+    =CL-USER=.
+  - Store configuration in the symbol-plist of a keyword.
+  - Use a configuration file in a well-known location.
+  - Create a package dedicated to storing this data.
+
+None of these options are ideal. Setting variables in =CL-USER=
+pollutes the namespace which is unacceptable to some users. 
+
+The psymbol-plist solution is not popular because, well, symbol-plists
+are not something people in general wants to use.
+
+Using a configuration file is the typical way of solving this problem
+in non-Lisp environments but it does present a problem as to where
+that configuration file should go. If we want to make this location
+configurable, we're recursed back to the original problem.
+
+Creating a dedicated package that stored the initial configuration is
+probably the cleanest solution, but it would require a much most
+complicated boilerplate configuration in the user's =$HOME/.sbclrc=.
+
+** symbol-plist as a bootstrapping solution
+
+The current prototype uses the symbol-plist solution for initial
+bootstrapping. In its simplest form, if one wants to change the
+location of the file-based storage engine, all that is needed in the
+Lisp init file is the following:
+
+#+BEGIN_SRC lisp
+(setf (get :lisp-pref-defaults :provider) '(:spec (#:LISP-PREF #:SIMPLE-PROVIDER)))
+#+END_SRC
+
+Of note here is that the provider is given as a list of two string
+designators: The package and symbol name of a class that implements
+the required functionality. This is needed because when this code is
+evaluated, the required packages might not have been loaded yet.
+
+* Configuration data format
+
+In order to make the storage engines less complex we will further
+limit the format of permitted configuration data to the following
+subset of the Common Lisp datatypes:
+
+  - Integers
+  - Floating-point numbers
+  - Strings
+  - Proper lists
+  - Alists keyed by a keyword
+
+This limited set of datatypes are designed to be easy to translate
+into various underlying storage engines, including things like SQL
+databases or JSON files.
+
+* Identifiers
+
+A configuration entry is identified by a list of keywords, for
+example:
+
+#+BEGIN_SRC lisp
+(:CLIM :FONTS :ROMAN)
+(:CLIM :FONTS :DEFAULT-SIZE)
+#+END_SRC
+
+The identifier is referred to as a "path" in the prototype
+implementation.
+
+The order of entries in the path goes from most to least significant,
+and can be used to order the existing elements into a tree.
+
+* Declaring types
+
+A type refers to a specific format of a configuration value. For
+example, a type can be a simple string, or a more complex format such
+as a list of host names.
+
+Note that a type doesn't just refer to the way the information is
+stored or accessed, it also contains information about how that data
+is accessed. For example, a *font family* datatype may be a simple
+string, but knowing that this string refers to a font family means
+that a configuration user interface can display a dedicated interface
+that allows the user to pick the family from a list of all existing
+families.
+
+The following pieces of information are associated with a type:
+
+  - Name
+  - Lisp structure (for example, a string, or a list of lists of
+    strings)
+  - Documentation
+  - Encoder (a function that takes any datatype and converts it to a
+    structure that follows the rules above)
+  - Decoder (a function that converts the Lisp structure back to an
+    object)
+  - Validator (a function that returns true if the value is valid
+    according to the type)
+
+Currently, the way a new type is declared is using the =DEFINE-TYPE=
+macro. An example invocation looks like this:
+
+#+BEGIN_SRC lisp
+(lisp-pref:define-type :hostname
+  :encode identity
+  :decode identity
+  :validator valid-hostname-p
+  :documentation "This type describes a hostname"
+  :structure :string
+#+END_SRC
+
+The =:STRUCTURE= declaration tells the system that the value is
+encoded as a list of two elements, a string followed by a list of
+string values.
+
+** Composite types
+
+It is conceivable that a type could be formed from other types. For
+example, the type *font* could be formed from two other types called
+*family* and *face*. To do this, the =:STRUCTURE= value can simply
+refer to these other types instead of the standard types.
+
+** Storage engine integration with types
+
+It is not necessary that the storage engine knows about the types.
+Just seeing the underlying data itself should be enough for it to load
+and save data.
+
+At the moment it is not clear if this is actually possible given the
+fact that it is impossible to tell an alist and a list of lists apart
+just by looking at the data. Perhaps alists should be stored as hash
+tables instead?
+
+* Declaring variables
+
+A customisable variable is the underlying thing that a user
+configures. All application declares its customisable variables using
+the =DEFINE-CUSTOM-VARIABLE= macro:
+
+#+BEGIN_SRC lisp
+(lisp-pref:define-custom-variable (:lisp-pref :example :hostname)
+  :type :hostname
+  :documentation "The hostname that the application should connect to")
+#+END_SRC
