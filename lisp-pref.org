@@ -188,3 +188,4 @@ the =DEFINE-CUSTOM-VARIABLE= macro:
 * Potential existing solutions
 
 https://github.com/scymtym/configuration.options
+CLIM editor for above-mentioned solution: https://techfak.de/~jmoringe/clim-option-editor.lisp
