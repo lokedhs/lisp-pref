@@ -185,3 +185,6 @@ the =DEFINE-CUSTOM-VARIABLE= macro:
   :type :hostname
   :documentation "The hostname that the application should connect to")
 #+END_SRC
+* Potential existing solutions
+
+https://github.com/scymtym/configuration.options
